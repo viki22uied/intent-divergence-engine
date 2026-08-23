@@ -1,0 +1,1 @@
+Implement first_n(items, n): return exactly the first n items of the list.

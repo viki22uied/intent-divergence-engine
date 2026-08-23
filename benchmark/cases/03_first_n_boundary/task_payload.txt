@@ -1,0 +1,8 @@
+{"claims": [
+  {"type": "postcondition", "text": "returns exactly n items, never more",
+   "source": "stated", "confidence": 1.0},
+  {"type": "edge_case", "text": "behavior when n is zero is unstated",
+   "source": "inferred", "confidence": 0.7, "ambiguous": true,
+   "branches": [{"interpretation": "return empty list"},
+                {"interpretation": "raise ValueError"}]}
+]}

@@ -1,0 +1,1 @@
+Implement sum_positives(nums): sum only the positive numbers. Negative items must not reduce the total.

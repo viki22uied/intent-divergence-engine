@@ -1,0 +1,5 @@
+{
+  "expect_divergence": true,
+  "defect_keywords": ["positive"],
+  "ambiguous_expected": ["C2"]
+}

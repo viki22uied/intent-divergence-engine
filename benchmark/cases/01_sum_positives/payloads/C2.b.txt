@@ -1,0 +1,8 @@
+```python
+import pytest
+from under_test import sum_positives
+
+def test_C2_b__empty_raises():
+    with pytest.raises(ValueError):
+        sum_positives([])
+```

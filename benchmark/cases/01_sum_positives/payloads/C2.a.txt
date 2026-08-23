@@ -1,0 +1,8 @@
+```python
+from under_test import sum_positives
+
+def test_C2_a__empty_returns_zero():
+    result = sum_positives([])
+    expected = 0
+    assert result == expected, f"INPUT: [] EXPECTED: {expected} ACTUAL: {result}"
+```

@@ -1,0 +1,8 @@
+{"claims": [
+  {"type": "postcondition", "text": "Cart total sums only positive-priced items",
+   "source": "stated", "confidence": 1.0},
+  {"type": "edge_case", "text": "Behavior for an empty cart is unstated",
+   "source": "inferred", "confidence": 0.7, "ambiguous": true,
+   "branches": [{"interpretation": "return 0"},
+                {"interpretation": "raise ValueError"}]}
+]}

@@ -1,0 +1,6 @@
+{"claims": [
+  {"type": "postcondition", "text": "clamps values below lo up to lo",
+   "source": "stated", "confidence": 1.0},
+  {"type": "postcondition", "text": "values inside the range pass through unchanged",
+   "source": "stated", "confidence": 1.0}
+]}

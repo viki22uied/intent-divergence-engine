@@ -1,0 +1,124 @@
+name: "Intent Divergence Engine"
+description: "Checks AI-generated code in a PR against the intent that produced it. Posts a coverage-first divergence report as a PR comment."
+author: "Vignesh Kumar"
+
+inputs:
+  task-file:
+    description: "Path (in repo) to the task description file (ticket/prompt text)."
+    required: false
+  task-text:
+    description: "Inline task description. Use if no task-file."
+    required: false
+  github-pr:
+    description: "Use the PR itself as intent source (R8.2): 'owner/repo#N'. Leave empty when task-file/task-text is set."
+    required: false
+  diff-file:
+    description: "Optional unified diff file; changed signatures are auto-extracted for synthesis."
+  signatures-file:
+    description: "Optional file listing function/module signatures touched by the diff."
+    required: false
+  project-dir:
+    description: "Root of the code under test."
+    default: "."
+  github-token:
+    description: "Token used to post the report comment."
+    default: ${{ github.token }}
+  max-tests-per-claim:
+    description: "Cost cap on generated tests per claim."
+    default: "3"
+  llm-base-url:
+    description: "OpenAI-compatible API base URL."
+    default: "https://api.openai.com/v1"
+  llm-model:
+    description: "Model name for extraction/synthesis."
+    default: "gpt-4o-mini"
+  llm-api-key:
+    description: "API key for the LLM provider (prefer secrets.IDE_LLM_API_KEY via env)."
+    required: false
+  update-comment:
+    description: "Update a previous IDE comment instead of adding a new one."
+    default: "true"
+
+outputs:
+  exit-code:
+    description: "0 ok, 1 divergence, 2 ambiguity, 3 system failure"
+    value: ${{ steps.run.outputs.exit_code }}
+  report-path:
+    description: "Path to report.md artifact"
+    value: ${{ steps.paths.outputs.report_path }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install engine
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+
+    - id: paths
+      shell: bash
+      run: echo "report_path=.ide/runs/latest/report.md" >> "$GITHUB_OUTPUT"
+
+    - id: run
+      shell: bash
+      env:
+        IDE_LLM_BASE_URL: ${{ inputs.llm-base-url }}
+        IDE_LLM_API_KEY: ${{ inputs.llm-api-key }}
+        IDE_LLM_MODEL: ${{ inputs.llm-model }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        ARGS=(run --project-dir "${{ inputs.project-dir }}" --out-dir .ide/runs/latest)
+        if [ -n "${{ inputs.task-file }}" ]; then ARGS+=(--task-file "${{ inputs.task-file }}"); fi
+        if [ -n "${{ inputs.signatures-file }}" ]; then ARGS+=(--signatures-file "${{ inputs.signatures-file }}"); fi
+        if [ -n "${{ inputs.task-text }}" ]; then ARGS+=(--task-text "${{ inputs.task-text }}"); fi
+        if [ -n "${{ inputs.diff-file }}" ]; then ARGS+=(--diff-file "${{ inputs.diff-file }}"); fi
+        if [ -n "${{ inputs.github-pr }}" ]; then
+          ARGS+=(--github-pr "${{ inputs.github-pr }}")
+        elif [ -z "${{ inputs.task-file }}" ] && [ -z "${{ inputs.task-text }}" ]; then
+          # default intent source: this PR's own description (R8.2)
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            ARGS+=(--github-pr "${{ github.repository }}#${{ github.event.pull_request.number }}")
+          fi
+        fi
+        ide "${ARGS[@]}"; echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      continue-on-error: true
+
+    - name: Post PR comment
+      if: always() && steps.run.outputs.exit_code != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        UPDATE_COMMENT: ${{ inputs.update-comment }}
+      run: |
+        REPORT=".ide/runs/latest/report.md"
+        MARKER="<!-- intent-divergence-engine -->"
+        BODY="${MARKER}
+        $(cat "$REPORT")"
+
+        COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+          --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
+
+        if [ -n "$COMMENT_ID" ] && [ "$UPDATE_COMMENT" = "true" ]; then
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
+            -f body="$BODY" > /dev/null
+        else
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
+        fi
+
+    - name: Enforce result
+      if: always()
+      shell: bash
+      run: |
+        CODE="${{ steps.run.outputs.exit_code }}"
+        echo "IDE finished with exit code $CODE (1=divergence, 2=ambiguity, 3=system failure)"
+        # Divergence (1) fails the check; ambiguity (2) is surfaced but does not block;
+        # system failure (3) never blocks the PR by default (R9.1).
+        if [ "$CODE" = "1" ]; then exit 1; fi
+        exit 0
+
+branding:
+  icon: "git-pull-request"
+  color: "purple"

@@ -1,0 +1,8 @@
+```python
+from under_test import first_n
+
+def test_C2_a__zero_returns_empty():
+    result = first_n([1, 2], 0)
+    expected = []
+    assert result == expected, f"INPUT: ([1, 2], 0) EXPECTED: {expected} ACTUAL: {result}"
+```

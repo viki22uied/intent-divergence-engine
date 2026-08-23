@@ -1,0 +1,8 @@
+```python
+from under_test import clamp
+
+def test_C1__clamps_below_lo():
+    result = clamp(-5, 0, 10)
+    expected = 0
+    assert result == expected, f"INPUT: (-5, 0, 10) EXPECTED: {expected} ACTUAL: {result}"
+```

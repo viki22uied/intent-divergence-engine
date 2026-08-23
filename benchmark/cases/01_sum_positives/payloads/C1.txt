@@ -1,0 +1,9 @@
+```python
+from under_test import sum_positives
+
+def test_C1__sums_only_positives():
+    nums = [-1, 2, 3]
+    result = sum_positives(nums)
+    expected = 5
+    assert result == expected, f"INPUT: {nums} EXPECTED: {expected} ACTUAL: {result}"
+```

@@ -1,0 +1,1 @@
+Implement clamp(value, lo, hi): constrain value to the inclusive range [lo, hi].

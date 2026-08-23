@@ -1,0 +1,11 @@
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pyide/
+.ide/
+*.pyc
+.pytest_cache/
+benchmark/cases/findings_for_review.csv
+benchmark/cases/last_results.json
+decisions.json

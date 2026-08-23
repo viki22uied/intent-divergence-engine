@@ -1,0 +1,8 @@
+```python
+import pytest
+from under_test import first_n
+
+def test_C2_b__zero_raises():
+    with pytest.raises(ValueError):
+        first_n([1, 2], 0)
+```
