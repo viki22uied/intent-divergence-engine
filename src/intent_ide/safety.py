@@ -5,6 +5,15 @@ dangerous generated files before they are written or executed. The real
 containment must come from container/VM isolation (see execute.py docstring);
 this gate makes accidental or naive prompt-injection payloads visible as
 'blocked: disallowed import' rather than silently executed.
+
+Known ceiling: any denylist over Python source is bypassable. The v3 re-audit
+demonstrated that `globals()["__builtins__"]["__import__"]("os").system(...)`
+passes this gate — it uses only Subscript/Call on `globals`/`getattr`-family
+primitives that legitimate tests also need, so blocking them would break normal
+code. We keep this gate as a cheap filter for unsophisticated payloads and as
+a regression test for the vulnerability *class*, not as a security boundary.
+Do not extend DENIED_IMPORT_ROOTS/DENIED_CALL_NAMES further expecting
+convergence; the next bypass is one `getattr`/`vars()` gadget away.
 """
 from __future__ import annotations
 

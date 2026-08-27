@@ -89,3 +89,22 @@ def test_C1__ok():
 
 def test_blocks_top_level_call():
     assert_blocked("import os\nos.system('id')\ndef test_C1__x():\n    assert True\n")
+
+
+def test_globals_bypass_is_known_ceiling():
+    """Documents the denylist ceiling: globals()/getattr indirection is NOT
+    blocked — this is expected. The gate is defense-in-depth only; real
+    isolation must come from a container (see safety.py docstring and README
+    Security). If this test starts failing (i.e. the payload becomes blocked),
+    update the docstring to reflect the new boundary."""
+    payload = """
+def test_C1__x():
+    g = globals()
+    b = g["__builtins__"]
+    imp = b["__import__"] if isinstance(b, dict) else getattr(b, "__import__")
+    os_mod = imp("os")
+    os_mod.system("id")
+    assert True
+"""
+    safe, reason = validate_generated_code(payload)
+    assert safe, f"expected safe (known bypass) but was blocked: {reason}"

@@ -10,7 +10,7 @@ from pathlib import Path
 from .config import Config
 from .coverage import compute_coverage, record_and_check_stability
 from .decisions import apply_decisions, load_decisions
-from .execute import SuiteRun, run_suite
+from .execute import SuiteRun, _sandbox_warning, run_suite
 from .extract import extract_intent, load_spec, save_spec
 from .llm import LLMClient, estimate_cost_usd
 from .models import IntentSpec
@@ -146,6 +146,10 @@ def run_pipeline(
             for r in run.results:
                 if "blocked by safety gate" in r.message:
                     errors.append(f"execution safety gate: {r.test_id}: {r.message[:200]}")
+            # surface container-isolation warning as a report-visible note, not just stdout
+            sw = _sandbox_warning()
+            if sw:
+                errors.append(f"sandbox: {sw}")
         except Exception as e:
             errors.append(f"execution stage failed: {e}")
 

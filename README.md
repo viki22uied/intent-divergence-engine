@@ -14,7 +14,7 @@ Five stages, each with a strict input/output contract:
 |---|---|---|
 | 1. Intent Extraction | Task text → structured `IntentSpec` of testable claims, with stated-vs-inferred provenance and a fixed ambiguity checklist (ordering, duplicates, empty/null input, off-by-one, concurrency/idempotency, error handling). Ambiguities are recorded as competing branches, never silently resolved. | R1.1–R1.4 |
 | 2. Test Synthesis | One example test per precondition/postcondition, a Hypothesis property test per invariant, one separate test file per ambiguity branch. Every test name carries its claim ID; untraceable tests are dropped and counted. | R2.1–R2.5 |
-| 3. Execution | Sandboxed subprocess (env allowlist, secret-pattern refusal), hard timeouts per test and suite, JUnit XML capture of inputs/actual/expected per failure. | R3.1–R3.4 |
+| 3. Execution | Subprocess with env allowlist, secret-pattern refusal, and AST pre-filter (defense-in-depth only — not a sandbox; see Security). Hard timeouts per test/suite, JUnit XML capture. | R3.1–R3.4 |
 | 4. Divergence Reporting | Coverage summary first, then Confirmed Divergent (plain-language: claim, input, actual, expected), Unresolved/Ambiguous side-by-side with no default answer, Confirmed Correct last. "Verified correct" language is structurally scrubbed. | R4.1–R4.4 |
 | 5. Coverage Reporting | Claims tested vs total, untestable claims listed with reasons, shown before pass results so low coverage can't masquerade as correctness. | R5.1–R5.3 |
 
