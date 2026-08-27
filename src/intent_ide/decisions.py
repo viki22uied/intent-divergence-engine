@@ -59,8 +59,12 @@ def apply_decisions(spec: IntentSpec, decisions: dict[str, str]) -> tuple[Intent
             branches=[],
         ))
         notes.append(f"{claim.id}: resolved to {branch.branch_id}")
+    resolved_any = any("resolved to" in n for n in notes)
+    bumped = spec.version + 1 if resolved_any else spec.version
+    # R1.4/R9.3: decision application is a new IntentSpec version so the
+    # pre-decision spec is never overwritten on disk (Finding 8).
     return IntentSpec(
-        version=spec.version,
+        version=bumped,
         task_description_hash=spec.task_description_hash,
         claims=new_claims,
         checklist_run=spec.checklist_run,

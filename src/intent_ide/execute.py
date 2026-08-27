@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -132,6 +133,27 @@ def _sandbox_warning() -> str | None:
     )
 
 
+def _clear_pycache(project_dir: Path) -> None:
+    # Windows mtime granularity is 1s; stale .pyc can survive a quick
+    # source overwrite (as in replay tests) and cause the old bytecode to
+    # be reused. Clear it before each pytest invocation.
+    for p in project_dir.rglob("__pycache__"):
+        try:
+            shutil.rmtree(p)
+        except OSError:
+            pass
+    for p in project_dir.rglob("*.pyc"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    for p in project_dir.rglob("*.pyo"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def run_suite(
     project_dir: Path,
     generated_tests_dir: Path,
@@ -147,6 +169,7 @@ def run_suite(
     gate before execution. Blocked files are reported as errors, not silently
     dropped, and never executed (Finding 1).
     """
+    _clear_pycache(project_dir)
     run = SuiteRun()
     junit_path = generated_tests_dir / "junit_report.xml"
     candidate_files = sorted(generated_tests_dir.glob("test_gen_*.py"))
@@ -196,10 +219,13 @@ def run_suite(
         popen = subprocess.Popen(
             cmd,
             cwd=str(project_dir),
-            env=build_sandbox_env({"PYTHONPATH": os.pathsep.join(
-                filter(None, [str(project_dir), str(generated_tests_dir),
-                              os.environ.get("IDE_EXTRA_PYTHONPATH", "")])
-            )}),
+            env=build_sandbox_env({
+                "PYTHONPATH": os.pathsep.join(
+                    filter(None, [str(project_dir), str(generated_tests_dir),
+                                  os.environ.get("IDE_EXTRA_PYTHONPATH", "")])
+                ),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
