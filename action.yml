@@ -38,6 +38,10 @@ inputs:
   update-comment:
     description: "Update a previous IDE comment instead of adding a new one."
     default: "true"
+  force-pull-request-target:
+    description: "Allow running on pull_request_target (unsafe — see README Security). Must be explicitly set to 'true'."
+    required: false
+    default: "false"
 
 outputs:
   exit-code:
@@ -78,11 +82,15 @@ runs:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+        FORCE_PULL_REQUEST_TARGET: ${{ inputs.force-pull-request-target }}
       run: |
         if [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
-          echo "::error::Refusing to run on pull_request_target. Use 'pull_request' (see README Security section). Set force-pull-request-target: 'true' input to override if you understand the risk."
-          echo "exit_code=3" >> "$GITHUB_OUTPUT"
-          exit 1
+          if [ "$FORCE_PULL_REQUEST_TARGET" != "true" ]; then
+            echo "::error::Refusing to run on pull_request_target. Use 'pull_request' (see README Security section). Set force-pull-request-target: 'true' input to override if you understand the risk."
+            echo "exit_code=3" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "::warning::Running on pull_request_target with explicit override — ensure you understand the supply-chain risk."
         fi
         ARGS=(run --project-dir "$IDE_PROJECT_DIR" --out-dir .ide/runs/latest)
         if [ -n "$IDE_TASK_FILE" ]; then ARGS+=(--task-file "$IDE_TASK_FILE"); fi
@@ -106,20 +114,22 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         UPDATE_COMMENT: ${{ inputs.update-comment }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         REPORT=".ide/runs/latest/report.md"
         MARKER="<!-- intent-divergence-engine -->"
         BODY="${MARKER}
         $(cat "$REPORT")"
 
-        COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+        COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$GITHUB_PR_NUMBER/comments" \
           --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
 
         if [ -n "$COMMENT_ID" ] && [ "$UPDATE_COMMENT" = "true" ]; then
-          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" \
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
             -f body="$BODY" > /dev/null
         else
-          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
+          gh pr comment "$GITHUB_PR_NUMBER" --body "$BODY"
         fi
 
     - name: Enforce result

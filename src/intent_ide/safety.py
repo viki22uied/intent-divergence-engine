@@ -31,6 +31,22 @@ DENIED_IMPORT_ROOTS = {
     "pydoc",
     "builtins",
     "importlib_metadata",
+    # filesystem / network primitives reachable without os/socket
+    "glob",
+    "sqlite3",
+    "xmlrpc",
+    "ftplib",
+    "smtplib",
+    "telnetlib",
+    "poplib",
+    "imaplib",
+    "ssl",
+    "tarfile",
+    "zipfile",
+    "pickle",
+    "marshal",
+    "dbm",
+    "shelve",
     # cloud metadata / credential-adjacent
     "boto3",
     "botocore",
@@ -62,6 +78,12 @@ def validate_generated_code(code: str) -> tuple[bool, str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in {"__builtins__", "__builtin__", "__spec__", "__loader__"}:
             return False, f"blocked: disallowed name '{node.id}'"
+        # alias-bypass defense: any Load of a denied call target is blocked,
+        # so `f = open; f(...)` is caught at the `open` on the RHS, not just
+        # at the later `f(...)` call site (which would otherwise bypass the
+        # Call.func name check). See re-audit.
+        if isinstance(node, ast.Name) and node.id in DENIED_CALL_NAMES and isinstance(node.ctx, ast.Load):
+            return False, f"blocked: disallowed identifier '{node.id}'"
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]

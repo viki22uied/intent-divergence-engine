@@ -23,18 +23,22 @@ def make_spec() -> IntentSpec:
 
 
 def test_apply_decision_resolves_claim():
-    new_spec, notes = apply_decisions(make_spec(), {"C1": "C1.b"})
+    spec = make_spec()
+    new_spec, notes = apply_decisions(spec, {"C1": "C1.b"})
     resolved = new_spec.claims[0]
     assert not resolved.ambiguous
     assert "RESOLVED by developer decision" in resolved.text
     assert "raise ValueError" in resolved.text
     assert any("resolved to C1.b" in n for n in notes)
+    assert new_spec.version == spec.version + 1
 
 
 def test_no_decision_keeps_ambiguity():
-    new_spec, notes = apply_decisions(make_spec(), {})
+    spec = make_spec()
+    new_spec, notes = apply_decisions(spec, {})
     assert new_spec.ambiguous_claims[0].id == "C1"
     assert any("still ambiguous" in n for n in notes)
+    assert new_spec.version == spec.version
 
 
 def test_unknown_branch_rejected():
