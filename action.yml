@@ -69,18 +69,32 @@ runs:
         IDE_LLM_API_KEY: ${{ inputs.llm-api-key }}
         IDE_LLM_MODEL: ${{ inputs.llm-model }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        IDE_TASK_FILE: ${{ inputs.task-file }}
+        IDE_TASK_TEXT: ${{ inputs.task-text }}
+        IDE_PROJECT_DIR: ${{ inputs.project-dir }}
+        IDE_DIFF_FILE: ${{ inputs.diff-file }}
+        IDE_SIGNATURES_FILE: ${{ inputs.signatures-file }}
+        IDE_GITHUB_PR: ${{ inputs.github-pr }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
-        ARGS=(run --project-dir "${{ inputs.project-dir }}" --out-dir .ide/runs/latest)
-        if [ -n "${{ inputs.task-file }}" ]; then ARGS+=(--task-file "${{ inputs.task-file }}"); fi
-        if [ -n "${{ inputs.signatures-file }}" ]; then ARGS+=(--signatures-file "${{ inputs.signatures-file }}"); fi
-        if [ -n "${{ inputs.task-text }}" ]; then ARGS+=(--task-text "${{ inputs.task-text }}"); fi
-        if [ -n "${{ inputs.diff-file }}" ]; then ARGS+=(--diff-file "${{ inputs.diff-file }}"); fi
-        if [ -n "${{ inputs.github-pr }}" ]; then
-          ARGS+=(--github-pr "${{ inputs.github-pr }}")
-        elif [ -z "${{ inputs.task-file }}" ] && [ -z "${{ inputs.task-text }}" ]; then
+        if [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
+          echo "::error::Refusing to run on pull_request_target. Use 'pull_request' (see README Security section). Set force-pull-request-target: 'true' input to override if you understand the risk."
+          echo "exit_code=3" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+        ARGS=(run --project-dir "$IDE_PROJECT_DIR" --out-dir .ide/runs/latest)
+        if [ -n "$IDE_TASK_FILE" ]; then ARGS+=(--task-file "$IDE_TASK_FILE"); fi
+        if [ -n "$IDE_SIGNATURES_FILE" ]; then ARGS+=(--signatures-file "$IDE_SIGNATURES_FILE"); fi
+        if [ -n "$IDE_TASK_TEXT" ]; then ARGS+=(--task-text "$IDE_TASK_TEXT"); fi
+        if [ -n "$IDE_DIFF_FILE" ]; then ARGS+=(--diff-file "$IDE_DIFF_FILE"); fi
+        if [ -n "$IDE_GITHUB_PR" ]; then
+          ARGS+=(--github-pr "$IDE_GITHUB_PR")
+        elif [ -z "$IDE_TASK_FILE" ] && [ -z "$IDE_TASK_TEXT" ]; then
           # default intent source: this PR's own description (R8.2)
-          if [ -n "${{ github.event.pull_request.number }}" ]; then
-            ARGS+=(--github-pr "${{ github.repository }}#${{ github.event.pull_request.number }}")
+          if [ -n "$GITHUB_PR_NUMBER" ]; then
+            ARGS+=(--github-pr "$GITHUB_REPOSITORY#$GITHUB_PR_NUMBER")
           fi
         fi
         ide "${ARGS[@]}"; echo "exit_code=$?" >> "$GITHUB_OUTPUT"

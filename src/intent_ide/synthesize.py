@@ -10,6 +10,7 @@ from pathlib import Path
 from .llm import LLMClient
 from .models import AmbiguityBranch, Claim, IntentSpec
 from .prompts import SYNTHESIS_SYSTEM, synthesis_user_prompt
+from .safety import validate_generated_code
 
 
 class SynthesisError(RuntimeError):
@@ -40,6 +41,8 @@ class TestSuite:
     tests: list[GeneratedTest] = field(default_factory=list)
     edge_categories_targeted: list[str] = field(default_factory=list)
     untraceable_dropped: int = 0
+    safety_blocked: int = 0
+    safety_block_reasons: list[str] = field(default_factory=list)
 
 
 def _slug(text: str) -> str:
@@ -193,6 +196,12 @@ def synthesize_suite(
                 )
             except SynthesisError as e:
                 print(f"[ide] synthesis skipped for {label}: {e}")
+                continue
+            safe, reason = validate_generated_code(code)
+            if not safe:
+                suite.safety_blocked += 1
+                suite.safety_block_reasons.append(f"{label}: {reason}")
+                print(f"[ide] safety gate blocked {label}: {reason}")
                 continue
             suite.untraceable_dropped += dropped
             file_index += 1

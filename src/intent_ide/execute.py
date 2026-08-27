@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .safety import validate_generated_code
+
 ENV_ALLOWLIST = {"PATH", "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "PATHEXT",
                  "TEMP", "TMP", "WINDIR", "HOME", "USERPROFILE", "PYTHONPATH"}
 SECRET_PATTERN = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AWS_|AZURE_|GCP_", re.IGNORECASE)
@@ -70,14 +72,18 @@ def _parse_failure_detail(message: str) -> tuple[str | None, str | None, str | N
     )
 
 
-def _watch_peak_memory(proc: subprocess.Popen, deadline: float) -> float | None:
+def _watch_peak_memory(
+    proc: subprocess.Popen, deadline: float, memory_limit_mb: int | None = None
+) -> tuple[float | None, bool]:
     """R3.4: sample child peak RSS while the suite runs, bounded by deadline.
-    Optional — requires psutil; silently skipped when unavailable."""
+    Returns (peak_mb, killed_for_memory). Optional — requires psutil."""
     try:
         import psutil
     except ImportError:
-        return None
+        return None, False
     peak_bytes = 0
+    killed = False
+    limit_bytes = (memory_limit_mb * 1024 * 1024) if memory_limit_mb else None
     try:
         proc_ps = psutil.Process(proc.pid)
         while proc.poll() is None and time.monotonic() < deadline:
@@ -89,12 +95,41 @@ def _watch_peak_memory(proc: subprocess.Popen, deadline: float) -> float | None:
                     except psutil.NoSuchProcess:
                         pass
                 peak_bytes = max(peak_bytes, mem)
+                if limit_bytes and mem > limit_bytes and not killed:
+                    # enforce memory ceiling — not just log (Finding 4)
+                    try:
+                        proc.kill()
+                        killed = True
+                        break
+                    except OSError:
+                        pass
             except psutil.NoSuchProcess:
                 break
             time.sleep(0.2)
     except psutil.Error:
+        return None, False
+    peak_mb = round(peak_bytes / (1024 * 1024), 1) if peak_bytes else None
+    return peak_mb, killed
+
+
+def _is_sandboxed() -> bool:
+    return (
+        os.environ.get("IDE_SANDBOXED") == "1"
+        or os.environ.get("IDE_ALLOW_UNSANDBOXED") == "1"
+        or Path("/.dockerenv").exists()
+        or Path("/run/.containerenv").exists()
+    )
+
+
+def _sandbox_warning() -> str | None:
+    if _is_sandboxed():
         return None
-    return round(peak_bytes / (1024 * 1024), 1) if peak_bytes else None
+    return (
+        "Execution is NOT container-isolated. Generated LLM code will run with "
+        "full host privileges. Set IDE_SANDBOXED=1 when running inside a "
+        "--network none container, or IDE_ALLOW_UNSANDBOXED=1 to acknowledge the risk. "
+        "See README Security section."
+    )
 
 
 def run_suite(
@@ -103,13 +138,44 @@ def run_suite(
     claim_map: dict[str, tuple[str, str | None]],
     suite_timeout_seconds: int,
     test_timeout_seconds: int,
+    memory_limit_mb: int | None = None,
 ) -> SuiteRun:
     """Execute generated tests against the code under test in a sandboxed
-    subprocess (R3.1), with hard timeouts (R3.2)."""
+    subprocess (R3.1), with hard timeouts (R3.2).
+
+    Defense-in-depth: each generated file is re-validated via the AST safety
+    gate before execution. Blocked files are reported as errors, not silently
+    dropped, and never executed (Finding 1).
+    """
     run = SuiteRun()
     junit_path = generated_tests_dir / "junit_report.xml"
-    node_ids = [str(p.resolve()) for p in sorted(generated_tests_dir.glob("test_gen_*.py"))]
+    candidate_files = sorted(generated_tests_dir.glob("test_gen_*.py"))
+    node_ids: list[str] = []
+    blocked: list[TestResult] = []
+    for p in candidate_files:
+        try:
+            code = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        safe, reason = validate_generated_code(code)
+        if not safe:
+            blocked.append(TestResult(
+                test_id=str(p.resolve()),
+                function_name=p.stem,
+                outcome="error",
+                message=f"blocked by safety gate: {reason}",
+            ))
+        else:
+            node_ids.append(str(p.resolve()))
+    # preserve blocked results even if nothing else runs
     if not node_ids:
+        run.results = blocked
+        warn = _sandbox_warning()
+        if warn and blocked:
+            # still surface the sandbox warning alongside the block
+            run.stdout_tail = warn
+        elif warn:
+            run.stdout_tail = warn
         return run
 
     cmd = [
@@ -125,6 +191,7 @@ def run_suite(
     started = time.monotonic()
     deadline = started + suite_timeout_seconds
     popen = None
+    killed_for_memory = False
     try:
         popen = subprocess.Popen(
             cmd,
@@ -137,7 +204,7 @@ def run_suite(
             stderr=subprocess.PIPE,
             text=True,
         )
-        peak_mb = _watch_peak_memory(popen, deadline)
+        peak_mb, killed_for_memory = _watch_peak_memory(popen, deadline, memory_limit_mb)
         remaining = max(0.1, deadline - time.monotonic())
         try:
             stdout, _stderr = popen.communicate(timeout=remaining)
@@ -146,13 +213,29 @@ def run_suite(
             run.timed_out = True
             popen.kill()
             popen.communicate()
+        if killed_for_memory:
+            run.timed_out = True
+            run.stdout_tail += f"\n[killed: exceeded memory limit {memory_limit_mb} MB]"
     finally:
         run.duration_seconds = time.monotonic() - started  # R3.4
     if peak_mb is not None:
         run.peak_memory_mb = peak_mb
+    if killed_for_memory:
+        # record as timeout-like so it surfaces in the report
+        run.results = blocked + [
+            TestResult(
+                test_id=fname,
+                function_name=fname,
+                outcome="timeout",
+                message=f"killed: exceeded memory limit {memory_limit_mb} MB",
+            )
+            for fname in node_ids
+        ]
+        return run
 
     if junit_path.exists():
-        run.results = _parse_junit(junit_path, claim_map)
+        parsed = _parse_junit(junit_path, claim_map)
+        run.results = blocked + parsed
     else:
         # whole-suite timeout: record each test as timeout so nothing is silently dropped
         for fname in node_ids:
@@ -160,6 +243,11 @@ def run_suite(
                 test_id=fname, function_name=fname, outcome="timeout",
                 message=f"suite exceeded {suite_timeout_seconds}s hard timeout",
             ))
+        run.results = blocked + run.results
+    warn = _sandbox_warning()
+    if warn:
+        # surface in stdout_tail so pipeline/report can surface it
+        run.stdout_tail = (run.stdout_tail + "\n" + warn).strip()
     return run
 
 

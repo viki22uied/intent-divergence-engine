@@ -38,14 +38,31 @@ def _validate_payload(payload: dict | list) -> list[dict]:
     return raw_claims
 
 
-def extract_intent(llm: LLMClient, task_description: str) -> tuple[IntentSpec, dict]:
+def extract_intent(
+    llm: LLMClient,
+    task_description: str,
+    max_claims: int = 25,
+    max_task_chars: int = 8000,
+) -> tuple[IntentSpec, dict]:
+    truncated = False
+    original_len = len(task_description)
+    if len(task_description) > max_task_chars:
+        task_description = task_description[:max_task_chars] + f"\n\n[truncated: original {original_len} chars, showing first {max_task_chars}]"
+        truncated = True
     payload = llm.complete_json(EXTRACTION_SYSTEM, extraction_user_prompt(task_description))[0]
     raw_claims = _validate_payload(payload)
+    dropped = 0
+    if len(raw_claims) > max_claims:
+        dropped = len(raw_claims) - max_claims
+        raw_claims = raw_claims[:max_claims]
     spec = IntentSpec.build(task_description, raw_claims)
     usage_meta = {
         "checklist_run": list(AMBIGUITY_CHECKLIST),
         "claim_count": len(spec.claims),
         "ambiguous_count": len(spec.ambiguous_claims),
+        "truncated_task": truncated,
+        "original_task_chars": original_len,
+        "claims_dropped_by_cap": dropped,
     }
     return spec, usage_meta
 

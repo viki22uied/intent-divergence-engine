@@ -45,7 +45,7 @@ class LLMClient:
 
 
 class OpenAICompatClient(LLMClient):
-    def __init__(self, base_url: str, api_key: str, model: str, timeout_seconds: int = 120):
+    def __init__(self, base_url: str, api_key: str, model: str, timeout_seconds: int = 120, max_tokens: int | None = None):
         if not api_key:
             raise LLMError(
                 "No LLM API key configured. Set IDE_LLM_API_KEY "
@@ -55,9 +55,10 @@ class OpenAICompatClient(LLMClient):
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.max_tokens = max_tokens
 
     def complete(self, system: str, user: str) -> LLMResponse:
-        payload = {
+        payload: dict = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
@@ -65,6 +66,33 @@ class OpenAICompatClient(LLMClient):
             ],
             "temperature": 0,
         }
+        if self.max_tokens:
+            payload["max_tokens"] = self.max_tokens
+        return self._complete_with_retry(payload)
+
+    def _complete_with_retry(self, payload: dict) -> LLMResponse:
+        import time as _time
+
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self._do_request(payload)
+            except LLMError as e:
+                last_exc = e
+                msg = str(e)
+                # only retry on transient: 429, 5xx, network timeout
+                retryable = (
+                    "HTTP 429" in msg
+                    or "HTTP 5" in msg
+                    or "request failed" in msg
+                    or "timed out" in msg.lower()
+                )
+                if not retryable or attempt == 2:
+                    raise
+                _time.sleep(2**attempt)
+        raise last_exc  # type: ignore[misc]
+
+    def _do_request(self, payload: dict) -> LLMResponse:
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -156,4 +184,4 @@ def estimate_cost_usd(usage: LLMUsage) -> float | None:
 def make_client(cfg) -> LLMClient:
     if os.environ.get("IDE_FAKE_LLM") == "1":
         raise LLMError("IDE_FAKE_LLM is only supported in tests; configure IDE_LLM_API_KEY.")
-    return OpenAICompatClient(cfg.llm_base_url, cfg.llm_api_key, cfg.llm_model)
+    return OpenAICompatClient(cfg.llm_base_url, cfg.llm_api_key, cfg.llm_model, max_tokens=getattr(cfg, "llm_max_tokens", None))

@@ -1,10 +1,22 @@
 """Stage 4 - Divergence Reporting (R4.1-R4.4)."""
 from __future__ import annotations
 
+import re
+
 from .config import Config
 from .coverage import CoverageSummary, compute_coverage
 from .execute import SuiteRun, TestResult
 from .models import IntentSpec
+
+
+def _escape_inline(s: str) -> str:
+    # break out of `...` inline code — neutralize backticks and pipes
+    return s.replace("`", "'").replace("|", "\\|").replace("\n", " ")[:400]
+
+
+def _escape_block(s: str) -> str:
+    # prevent breaking out of ``` fences
+    return s.replace("```", "'''")[:2000]
 
 PROHIBITED_PHRASES = [
     "verified correct",
@@ -31,25 +43,36 @@ def scrub_prohibited_language(report_text: str) -> str:
 
 def _divergent_entry_md(r: TestResult, spec: IntentSpec) -> str:
     claim = next((c for c in spec.claims if c.id == r.claim_id), None)
-    label = r.branch_id or r.claim_id
+    label = _escape_inline(r.branch_id or r.claim_id or "unknown")
+    claim_text = _escape_inline(claim.text if claim else "(claim text unavailable)")
     if r.actual:
-        actual_txt = "`" + r.actual.splitlines()[0][:300] + "`"
+        actual_txt = "`" + _escape_inline(r.actual.splitlines()[0][:300]) + "`"
     elif r.message:
-        actual_txt = "`" + r.message.splitlines()[-1][:300] + "`"
+        actual_txt = "`" + _escape_inline(r.message.splitlines()[-1][:300]) + "`"
     else:
         actual_txt = "(see failure output)"
+    failing = _escape_inline(r.failing_input) if r.failing_input else "see test output"
+    expected = _escape_inline(r.expected) if r.expected else "(per claim above)"
+    # pick a fence longer than any run in the message (Finding 7)
+    fence = "```"
+    if r.message and "```" in r.message:
+        # find longest backtick run and go one longer
+        longest = max((len(m.group(0)) for m in re.finditer(r"`+", r.message)), default=3)
+        fence = "`" * (longest + 1)
+        # but also neutralize the exact fence string inside
+    block_content = _escape_block(r.message[:1500]) if r.message else ""
     lines = [
         f"### Divergence on `{label}`",
-        f"- **Claim violated:** {claim.text if claim else '(claim text unavailable)'}",
-        f"- **Input:** `{r.failing_input or 'see test output'}`",
+        f"- **Claim violated:** {claim_text}",
+        f"- **Input:** `{failing}`",
         f"- **Actual behavior:** {actual_txt}",
-        f"- **Expected behavior (per intent):** {r.expected or '(per claim above)'}",
+        f"- **Expected behavior (per intent):** {expected}",
         "",
         "<details><summary>Raw failure output</summary>",
         "",
-        "```",
-        r.message[:1500],
-        "```",
+        fence,
+        block_content,
+        fence,
         "",
         "</details>",
         "",
@@ -63,13 +86,13 @@ def _ambiguous_section_md(spec: IntentSpec) -> str:
         return ""
     lines = ["## Unresolved / Ambiguous — your decision is required", ""]
     for claim in ambiguous:
-        lines.append(f"### {claim.id}: {claim.text}")
+        lines.append(f"### {_escape_inline(claim.id)}: {_escape_inline(claim.text)}")
         lines.append("")
         lines.append("| Branch | Interpretation |")
         lines.append("|---|---|")
         for b in claim.branches:
-            interp = b.interpretation.replace("|", "\\|").replace("\n", " ")
-            lines.append(f"| `{b.branch_id}` | {interp} |")
+            interp = _escape_inline(b.interpretation)
+            lines.append(f"| `{_escape_inline(b.branch_id)}` | {interp} |")
         lines.append("")
         lines.append(
             "These readings conflict. The engine did **not** pick one. Tests were "

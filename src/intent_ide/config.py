@@ -19,6 +19,10 @@ class Config:
     suite_timeout_seconds: int = 300
     test_timeout_seconds: int = 30
     max_hypothesis_examples: int = 100
+    max_claims: int = 25
+    max_task_chars: int = 8000
+    llm_max_tokens: int = 2000
+    memory_limit_mb: int = 1024
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -30,4 +34,8 @@ class Config:
             suite_timeout_seconds=_int_env("IDE_SUITE_TIMEOUT_SECONDS", 300),
             test_timeout_seconds=_int_env("IDE_TEST_TIMEOUT_SECONDS", 30),
             max_hypothesis_examples=_int_env("IDE_MAX_HYPOTHESIS_EXAMPLES", 100),
+            max_claims=_int_env("IDE_MAX_CLAIMS", 25),
+            max_task_chars=_int_env("IDE_MAX_TASK_CHARS", 8000),
+            llm_max_tokens=_int_env("IDE_LLM_MAX_TOKENS", 2000),
+            memory_limit_mb=_int_env("IDE_MEMORY_LIMIT_MB", 1024),
         )

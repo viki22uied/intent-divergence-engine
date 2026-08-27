@@ -81,7 +81,20 @@ def run_pipeline(
     errors: list[str] = []
 
     try:
-        spec, extract_meta = extract_intent(llm, task_description)
+        spec, extract_meta = extract_intent(
+            llm, task_description,
+            max_claims=cfg.max_claims,
+            max_task_chars=cfg.max_task_chars,
+        )
+        # surface caps as warnings in report
+        if extract_meta.get("claims_dropped_by_cap"):
+            errors.append(
+                f"extraction: {extract_meta['claims_dropped_by_cap']} claims dropped: exceeds IDE_MAX_CLAIMS={cfg.max_claims} (reported as untested, not silently ignored)"
+            )
+        if extract_meta.get("truncated_task"):
+            errors.append(
+                f"task description truncated from {extract_meta['original_task_chars']} to {cfg.max_task_chars} chars (IDE_MAX_TASK_CHARS)"
+            )
     except Exception as e:
         return _system_failure("Stage 1 (intent extraction)", e, None, out_dir)
     spec_path = save_spec(spec, out_dir)  # R1.4 (pre-decision version)
@@ -111,6 +124,12 @@ def run_pipeline(
         json.dumps({k: list(v) for k, v in claim_map.items()}, indent=2),
         encoding="utf-8")
 
+    # surface safety-gate blocks (Finding 1) as system notes
+    if suite.safety_blocked:
+        errors.append(
+            f"safety gate blocked {suite.safety_blocked} generated test(s): "
+            + "; ".join(suite.safety_block_reasons[:3])
+        )
     runs: list[SuiteRun] = []
     if suite.files:
         try:
@@ -120,8 +139,13 @@ def run_pipeline(
                 claim_map=claim_map,
                 suite_timeout_seconds=cfg.suite_timeout_seconds,
                 test_timeout_seconds=cfg.test_timeout_seconds,
+                memory_limit_mb=cfg.memory_limit_mb,
             )
             runs.append(run)
+            # also surface any execute-time blocks
+            for r in run.results:
+                if "blocked by safety gate" in r.message:
+                    errors.append(f"execution safety gate: {r.test_id}: {r.message[:200]}")
         except Exception as e:
             errors.append(f"execution stage failed: {e}")
 
@@ -223,6 +247,7 @@ def replay_run(project_dir: Path, run_dir: Path, cfg: Config | None = None) -> P
         claim_map=claim_map,
         suite_timeout_seconds=cfg.suite_timeout_seconds,
         test_timeout_seconds=cfg.test_timeout_seconds,
+        memory_limit_mb=cfg.memory_limit_mb,
     )
     report = build_report(
         spec, [run],
